@@ -1,0 +1,131 @@
+---
+title: "Practical Machine Learning - Prediction Assignment"
+author: "Mehran Behzad"
+date: "26 6 2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Intro
+Data from fitness tracking devices were gathered for subjects doing curls in 4 different manners (see [http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har]). The goal of this assignment is to build a training model based on these data capable of predicting the tpye of exersise based of the movement data measured by these devices.
+
+
+## Data exploration and cleanup
+```{r echo = T, results = 'hide'}
+# load libraries
+library(dplyr)
+library(caret)
+
+# read data
+training <- read.csv(file = 'data/pml-training.csv')
+testing <- read.csv(file = 'data/pml-testing.csv')
+
+```
+
+The table has `r dim(training)[1]` rows of data, each has `r dim(training)[2]` features.
+
+
+```{r}
+# 
+head(training[(1:10)])
+
+```
+
+It seems the first 7 columns are user specific or some time stamps and not task specific. We can remove them for the training.
+
+
+```{r}
+# remove first columns which are not relevant for the excercise
+training <- training[-(1:7)]
+```
+
+Furtermore, there are alot of features that are almost N/A for all obesrvations. We will remove them:
+
+
+```{r}
+# remove column which have at least 90% NAs
+training <- training[ , apply(training, 2, function(y) length(which(is.na(y))) < .90 * dim(training)[1])]
+# same for test set
+testing <- testing[-(1:7)]
+testing <- testing[ , apply(testing, 2, function(y) length(which(is.na(y))) < .90 * dim(testing)[1])]
+```
+
+We will also remove any feature/column which is missing the Training or Testing data set which won't help with prediction or training.
+
+
+```{r}
+# memorize the calsse column which is delibertly missing in the tetesting dataset and has to be predicted.
+classe <- training$classe
+
+# remove those which are only present in one dataset
+testing <- testing[, intersect(colnames(training), colnames(testing))]
+training <- training[, intersect(colnames(training), colnames(testing))]
+training$classe <- classe
+
+```
+
+This gives us `r dim(training)[2]` features which we will feed the models with.
+
+
+## Training
+
+Now we will split our training data, to allow testing its prediction with known observations:
+
+```{r}
+inTrain <- createDataPartition(y= training$classe, p=0.7, list=FALSE)
+trainingSub <- training[inTrain,]
+testingSub <- training[-inTrain,]
+```
+
+Using the Random Forest (rf) algorithm to train the model
+
+```{r, model_rf, cache = TRUE}
+ 
+model_rf <- train(classe  ~ ., method="rf", data = trainingSub,
+               trControl = trainControl(method = "cv"),
+               number = 3, na.action=na.exclude)
+
+```
+
+We build a second model using lda technique:
+
+```{r, model_lda, cache = TRUE}
+
+model_lda <- train(classe~., method="lda", data = trainingSub,
+                trControl=  trainControl(method="cv", number=10),
+                na.action=na.exclude)
+```
+
+## Evaluation
+
+
+```{r}
+confusionMatrix(testingSub$classe, predict(model_rf, testingSub))
+confusionMatrix(testingSub$classe, predict(model_lda, testingSub))
+
+```
+
+It seems that the random forest method gives us a model with a hight (~99%) accuracy.
+
+
+Let's see which parameters have the mose influence:
+
+```{r}
+varImp(model_rf)
+```
+
+And the one with most effect plotted:
+
+```{r}
+ggplot(trainingSub, aes(y=roll_belt, x = c(1:dim(trainingSub)[1]), colour = factor(classe))) +
+  geom_point(size=4, alpha=0.7) +
+  labs(color = "Dumbbell Biceps Curl Type")
+```
+
+### Predicting testing data
+
+```{r}
+predict(model_rf, testing)
+```
+
